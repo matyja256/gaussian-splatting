@@ -145,7 +145,7 @@ def render_psf(pc: GaussianModel, PSF):
                                          dist.unsqueeze(-1)))
             before_conv = before_conv.squeeze()
             after_conv = F.conv2d(grey * before_conv.unsqueeze(0).unsqueeze(0), PSF[j, :, :].unsqueeze(0).unsqueeze(0),
-                                  padding=11)
+                                  padding=67)
             image = image + T * (1 - torch.exp(- 0.1 * opacity)) * after_conv.squeeze()
             summation = summation + opacity * 0.1
         rendered_image[j, :, :] = image[:, :]
