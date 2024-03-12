@@ -8,6 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
+import pdb
 
 import torch
 import math
@@ -111,21 +112,31 @@ def render_psf(pc: GaussianModel, PSF):
     """
 
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
-    screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
-    try:
-        screenspace_points.retain_grad()
-    except:
-        pass
+    # screenspace_points = torch.zeros_like(pc.get_xyz, dtype=pc.get_xyz.dtype, requires_grad=True, device="cuda") + 0
+    # try:
+    #     screenspace_points.retain_grad()
+    # except:
+    #     pass
+    # screenspace_points.retain_grad()
     num_psf = PSF.shape[0]
-    screenspace_points[:, 0] = pc.get_xyz[:, 0]
-    screenspace_points[:, 1] = pc.get_xyz[:, 1]
+    # pdb.set_trace()
+    # screenspace_points[:, 0] = pc.get_xyz[:, 0]
+    # screenspace_points[:, 1] = pc.get_xyz[:, 1]
+    # pdb.set_trace()
     rendered_image = torch.zeros((num_psf, 512, 512), device="cuda")
     sorted_tensor, indices = torch.sort(pc.get_xyz[:, 2])
     symm = pc.get_covariance()
+    x_range = torch.arange(512, device="cuda")
+    y_range = torch.arange(512, device="cuda")
+    y, x = torch.meshgrid(y_range, x_range)
     for j in range(num_psf):
+        # print("psf_id:")
+        # print(j)
         image = torch.zeros((512, 512), device="cuda")
         summation = torch.tensor(0, device="cuda")
         for i in range(pc.get_xyz.shape[0]):
+            # print("gaussian id:")
+            # print(i)
             index = indices[i]
             xyz = pc.get_xyz[index, :]
             covariance_2D = torch.zeros((2, 2), device="cuda")
@@ -135,19 +146,20 @@ def render_psf(pc: GaussianModel, PSF):
             covariance_2D[1, 1] = symm[index, 3]
             opacity = pc.get_opacity[index]
             grey = pc.get_grey[index]
-            x_range = torch.arange(512, device="cuda")
-            y_range = torch.arange(512, device="cuda")
-            y, x = torch.meshgrid(y_range, x_range)
+            # x_range = torch.arange(512, device="cuda")
+            # y_range = torch.arange(512, device="cuda")
+            # y, x = torch.meshgrid(y_range, x_range)
             dist = torch.stack([x, y], dim=-1) - xyz[:2]
             T = torch.exp(- summation)
             before_conv = (1 / torch.sqrt(torch.det(covariance_2D))) * torch.exp(
                 (- 1 / 2) * torch.matmul(torch.matmul(dist.unsqueeze(-2), torch.linalg.pinv(covariance_2D)),
-                                         dist.unsqueeze(-1)))
-            before_conv = before_conv.squeeze()
+                                         dist.unsqueeze(-1))).squeeze()
+            # before_conv = before_conv.squeeze()
             after_conv = F.conv2d(grey * before_conv.unsqueeze(0).unsqueeze(0), PSF[j, :, :].unsqueeze(0).unsqueeze(0),
-                                  padding=67)
+                                  padding=17)
             image = image + T * (1 - torch.exp(- 0.1 * opacity)) * after_conv.squeeze()
             summation = summation + opacity * 0.1
+            # torch.cuda.empty_cache()
         rendered_image[j, :, :] = image[:, :]
 
     # # Set up rasterization configuration
@@ -220,4 +232,5 @@ def render_psf(pc: GaussianModel, PSF):
     #         "visibility_filter": radii > 0,
     #         "radii": radii}
 
-    return rendered_image, screenspace_points
+    return rendered_image
+

@@ -11,6 +11,7 @@
 
 import os
 import torch
+import pdb
 from random import randint
 import numpy as np
 from PIL import Image
@@ -55,7 +56,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
+    count = 0
     for iteration in range(first_iter, opt.iterations + 1):
+        print('iteration:')
+        print(iteration)
         # if network_gui.conn == None:
         #     network_gui.try_connect()
         # while network_gui.conn != None:
@@ -71,9 +75,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         #     except Exception as e:
         #         network_gui.conn = None
 
-        iter_start.record()
+        # iter_start.record()
 
-        gaussians.update_learning_rate(iteration)
+        # gaussians.update_learning_rate(iteration)
 
         # Every 1000 its we increase the levels of SH up to a maximum degree
         # if iteration % 1000 == 0:
@@ -85,79 +89,147 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
 
         # Render
-        if (iteration - 1) == debug_from:
+        if (count - 1) == debug_from:
             pipe.debug = True
 
-        bg = torch.rand((3), device="cuda") if opt.random_background else background
+        # bg = torch.rand((3), device="cuda") if opt.random_background else background
 
         # render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         # image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
-        images, viewspace_point_tensor = render_psf(gaussians, PSF)
+        for batch in range(PSF.shape[0]):
+            iter_start.record()
+            gaussians.update_learning_rate(count)
+            count += 1
+            print("count:")
+            print(count)
+            images = render_psf(gaussians, PSF[batch, :, :].unsqueeze(0))
+            # min_vals, _ = torch.min(images, dim=[1, 2], keepdim=True)
+            # max_vals, _ = torch.max(images, dim=[1, 2], keepdim=True)
+            min_vals, _ = torch.min(torch.min(images, dim=1, keepdim=True)[0], dim=1, keepdim=True)
+            max_vals, _ = torch.max(torch.max(images, dim=1, keepdim=True)[0], dim=1, keepdim=True)
+            images = (images - min_vals) / (max_vals - min_vals)
 
-        # Loss
-        # gt_image = viewpoint_cam.original_image.cuda()
-        min_vals, _ = torch.min(images, dim=(1, 2), keepdim=True)
-        max_vals, _ = torch.max(images, dim=(1, 2), keepdim=True)
-        images = (images - min_vals) / (max_vals - min_vals)
+            Ll1 = l1_loss(images, gt_image[batch, :, :].unsqueeze(0))
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(images, gt_image[batch, :, :].unsqueeze(0)))
+            loss.backward()
 
-        Ll1 = l1_loss(images, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(images, gt_image))
-        loss.backward()
+            iter_end.record()
 
-        iter_end.record()
+            with torch.no_grad():
+                # Progress bar
+                ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
+                if count % 10 == 0:
+                    progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
+                    progress_bar.update(10)
+                if count == opt.iterations:
+                    progress_bar.close()
 
-        with torch.no_grad():
-            # Progress bar
-            ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
-            if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
-                progress_bar.update(10)
-            if iteration == opt.iterations:
-                progress_bar.close()
+                # Log and save
+                training_report(tb_writer, count, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end),
+                                testing_iterations, scene, render, (pipe, background))
+                # if (iteration in saving_iterations):
+                #     print("\n[ITER {}] Saving Gaussians".format(iteration))
+                #     scene.save(iteration)
 
-            # Log and save
-            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end),
-                            testing_iterations, scene, render, (pipe, background))
-            # if (iteration in saving_iterations):
-            #     print("\n[ITER {}] Saving Gaussians".format(iteration))
-            #     scene.save(iteration)
+                # Densification
+                if count < opt.densify_until_iter:
+                    # Keep track of max radii in image-space for pruning
+                    # gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
+                    # gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+                    gaussians.add_densification_stats(gaussians.get_xyz)
 
-            # Densification
-            if iteration < opt.densify_until_iter:
-                # Keep track of max radii in image-space for pruning
-                # gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                # gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
-                gaussians.add_densification_stats(viewspace_point_tensor)
+                    if count > opt.densify_from_iter and count % opt.densification_interval == 0:
+                        size_threshold = 20 if count > opt.opacity_reset_interval else None
+                        gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent,
+                                                    size_threshold)
 
-                if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
+                    if count % opt.opacity_reset_interval == 0 or (
+                            dataset.white_background and count == opt.densify_from_iter):
+                        gaussians.reset_opacity()
 
-                if iteration % opt.opacity_reset_interval == 0 or (
-                        dataset.white_background and iteration == opt.densify_from_iter):
-                    gaussians.reset_opacity()
+                if count % 100 == 0:
+                    psf_ideal = torch.zeros((1, 35, 35), device="cuda")
+                    psf_ideal[:, 17, 17] = 1
+                    im = render_psf(gaussians, psf_ideal)
+                    im = im.squeeze()
+                    im_np = im.cpu().numpy()
+                    im_normalized = (im_np - im_np.min()) / (im_np.max() - im_np.min())
+                    im_normalized = im_normalized * 255
+                    im_uint8 = im_normalized.astype(np.uint8)
+                    im_save = Image.fromarray(im_uint8, mode='L')
+                    im_save.save('./results/gray_{}.png'.format(count))
 
-            # Optimizer step
-            if iteration < opt.iterations:
+            if count < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none=True)
+
+        # pdb.set_trace()
+        # images, viewspace_point_tensor = render_psf(gaussians, PSF)
+        #
+        # # Loss
+        # # gt_image = viewpoint_cam.original_image.cuda()
+        # min_vals, _ = torch.min(images, dim=(1, 2), keepdim=True)
+        # max_vals, _ = torch.max(images, dim=(1, 2), keepdim=True)
+        # images = (images - min_vals) / (max_vals - min_vals)
+        #
+        # Ll1 = l1_loss(images, gt_image)
+        # loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(images, gt_image))
+        # loss.backward()
+
+        # iter_end.record()
+
+        # with torch.no_grad():
+        #     # Progress bar
+        #     ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
+        #     if iteration % 10 == 0:
+        #         progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
+        #         progress_bar.update(10)
+        #     if iteration == opt.iterations:
+        #         progress_bar.close()
+        #
+        #     # Log and save
+        #     training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end),
+        #                     testing_iterations, scene, render, (pipe, background))
+        #     # if (iteration in saving_iterations):
+        #     #     print("\n[ITER {}] Saving Gaussians".format(iteration))
+        #     #     scene.save(iteration)
+        #
+        #     # Densification
+        #     if iteration < opt.densify_until_iter:
+        #         # Keep track of max radii in image-space for pruning
+        #         # gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
+        #         # gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+        #         gaussians.add_densification_stats(gaussians.get_xyz)
+        #
+        #         if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
+        #             size_threshold = 20 if iteration > opt.opacity_reset_interval else None
+        #             gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
+        #
+        #         if iteration % opt.opacity_reset_interval == 0 or (
+        #                 dataset.white_background and iteration == opt.densify_from_iter):
+        #             gaussians.reset_opacity()
+
+            # Optimizer step
+            # if iteration < opt.iterations:
+            #     gaussians.optimizer.step()
+            #     gaussians.optimizer.zero_grad(set_to_none=True)
 
             # if (iteration in checkpoint_iterations):
             #     print("\n[ITER {}] Saving Checkpoint".format(iteration))
             #     torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
-            if iteration % 1000 == 0:
-                psf_ideal = torch.zeros((1, 135, 135), device="cuda")
-                psf_ideal[:, 67, 67] = 1
-                im, _ = render_psf(gaussians, psf_ideal)
-                im = im.squeeze()
-                im_np = im.numpy()
-                im_normalized = (im_np - im_np.min()) / (im_np.max() - im_np.min())
-                im_normalized = im_normalized * 255
-                im_uint8 = im_normalized.astype(np.uint8)
-                im_save = Image.fromarray(im_uint8, mode='L')
-                im_save.save('./results/gray_{}.png'.format(iteration))
+            # if iteration % 1000 == 0:
+            #     psf_ideal = torch.zeros((1, 35, 35), device="cuda")
+            #     psf_ideal[:, 17, 17] = 1
+            #     im, _ = render_psf(gaussians, psf_ideal)
+            #     im = im.squeeze()
+            #     im_np = im.numpy()
+            #     im_normalized = (im_np - im_np.min()) / (im_np.max() - im_np.min())
+            #     im_normalized = im_normalized * 255
+            #     im_uint8 = im_normalized.astype(np.uint8)
+            #     im_save = Image.fromarray(im_uint8, mode='L')
+            #     im_save.save('./results/gray_{}.png'.format(iteration))
 
 
 def prepare_output_and_logger(args):
@@ -245,11 +317,11 @@ if __name__ == "__main__":
     args.save_iterations.append(args.iterations)
 
     gt_image = torch.zeros((81, 512, 512), device="cuda")
-    PSF = torch.zeros((81, 135, 135), device="cuda")
+    PSF = torch.zeros((81, 35, 35), device="cuda")
 
     for i in range(PSF.shape[0]):
         psf_data = loadmat('G:/imaging/metasensor/training_data/psf_{}.mat'.format(i + 1))
-        psf = psf_data['psf']
+        psf = psf_data['psf'][50:85, 50:85]
         PSF[i, :, :] = torch.tensor(psf, device="cuda")
 
         abbe_image_data = loadmat('G:/imaging/metasensor/training_data/abbe_image_{}.mat'.format(i + 1))
