@@ -106,8 +106,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             images = render_psf(gaussians, PSF[batch, :, :].unsqueeze(0))
             # min_vals, _ = torch.min(images, dim=[1, 2], keepdim=True)
             # max_vals, _ = torch.max(images, dim=[1, 2], keepdim=True)
-            min_vals, _ = torch.min(torch.min(images, dim=1, keepdim=True)[0], dim=1, keepdim=True)
-            max_vals, _ = torch.max(torch.max(images, dim=1, keepdim=True)[0], dim=1, keepdim=True)
+            min_vals, _ = torch.min(torch.min(images, dim=1, keepdim=True)[0], dim=2, keepdim=True)
+            max_vals, _ = torch.max(torch.max(images, dim=1, keepdim=True)[0], dim=2, keepdim=True)
             images = (images - min_vals) / (max_vals - min_vals)
 
             Ll1 = l1_loss(images, gt_image[batch, :, :].unsqueeze(0))
@@ -328,8 +328,8 @@ if __name__ == "__main__":
         abbe_image = abbe_image_data['abbe_image']
         gt_image[i, :, :] = torch.tensor(abbe_image, device="cuda")
 
-    min_vals, _ = torch.min(torch.min(gt_image, dim=1, keepdim=True)[0], dim=1, keepdim=True)
-    max_vals, _ = torch.max(torch.max(gt_image, dim=1, keepdim=True)[0], dim=1, keepdim=True)
+    min_vals, _ = torch.min(torch.min(gt_image, dim=1, keepdim=True)[0], dim=2, keepdim=True)
+    max_vals, _ = torch.max(torch.max(gt_image, dim=1, keepdim=True)[0], dim=2, keepdim=True)
     gt_image = (gt_image - min_vals) / (max_vals - min_vals)
 
     # Initialize system state (RNG)
