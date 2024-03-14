@@ -113,7 +113,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             Ll1 = l1_loss(images, gt_image[batch, :, :].unsqueeze(0))
             loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(images, gt_image[batch, :, :].unsqueeze(0)))
             loss.backward()
-
+            # pdb.set_trace()
             iter_end.record()
 
             with torch.no_grad():
@@ -327,6 +327,10 @@ if __name__ == "__main__":
         abbe_image_data = loadmat('G:/imaging/metasensor/training_data/abbe_image_{}.mat'.format(i + 1))
         abbe_image = abbe_image_data['abbe_image']
         gt_image[i, :, :] = torch.tensor(abbe_image, device="cuda")
+
+    min_vals, _ = torch.min(torch.min(gt_image, dim=1, keepdim=True)[0], dim=1, keepdim=True)
+    max_vals, _ = torch.max(torch.max(gt_image, dim=1, keepdim=True)[0], dim=1, keepdim=True)
+    gt_image = (gt_image - min_vals) / (max_vals - min_vals)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)

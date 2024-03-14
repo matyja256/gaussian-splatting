@@ -155,10 +155,10 @@ class GaussianModel:
     #     self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
     def create_from_pcd(self):
-        fused_point_cloud = torch.rand(1000, 3).float().cuda()
+        fused_point_cloud = torch.rand(10000, 3).float().cuda()
         fused_point_cloud = fused_point_cloud * 511
         # fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
-        greys = torch.rand(1000, 1).float().cuda()
+        greys = torch.rand(10000, 1).float().cuda()
 
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
 
