@@ -43,8 +43,8 @@ class GaussianModel:
         self.rotation_activation = torch.nn.functional.normalize
 
     def __init__(self, sh_degree: int):
-        self.active_sh_degree = 0
-        self.max_sh_degree = sh_degree
+        # self.active_sh_degree = 0
+        # self.max_sh_degree = sh_degree
         self._xyz = torch.empty(0)
         # self._features_dc = torch.empty(0)
         # self._features_rest = torch.empty(0)
@@ -52,7 +52,7 @@ class GaussianModel:
         self._rotation = torch.empty(0)
         self._opacity = torch.empty(0)
         self._grey = torch.empty(0)
-        self.max_radii2D = torch.empty(0)
+        # self.max_radii2D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(0)
         self.denom = torch.empty(0)
         self.optimizer = None
@@ -62,7 +62,6 @@ class GaussianModel:
 
     def capture(self):
         return (
-            self.active_sh_degree,
             self._xyz,
             # self._features_dc,
             # self._features_rest,
@@ -70,7 +69,6 @@ class GaussianModel:
             self._rotation,
             self._opacity,
             self._grey,
-            self.max_radii2D,
             self.xyz_gradient_accum,
             self.denom,
             self.optimizer.state_dict(),
@@ -78,15 +76,13 @@ class GaussianModel:
         )
 
     def restore(self, model_args, training_args):
-        (self.active_sh_degree,
-         self._xyz,
+        (self._xyz,
          # self._features_dc,
          # self._features_rest,
          self._scaling,
          self._rotation,
          self._opacity,
          self._grey,
-         self.max_radii2D,
          xyz_gradient_accum,
          denom,
          opt_dict,
@@ -155,10 +151,10 @@ class GaussianModel:
     #     self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
     def create_from_pcd(self):
-        fused_point_cloud = torch.rand(10000, 3).float().cuda()
+        fused_point_cloud = torch.rand(1000, 3).float().cuda()
         fused_point_cloud = fused_point_cloud * 511
         # fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
-        greys = torch.rand(10000, 1).float().cuda()
+        greys = torch.rand(1000, 1).float().cuda()
 
         print("Number of points at initialisation : ", fused_point_cloud.shape[0])
 
@@ -174,7 +170,7 @@ class GaussianModel:
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self._grey = nn.Parameter(greys.requires_grad_(True))
-        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
+        # self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
@@ -337,7 +333,7 @@ class GaussianModel:
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
 
         self.denom = self.denom[valid_points_mask]
-        self.max_radii2D = self.max_radii2D[valid_points_mask]
+        # self.max_radii2D = self.max_radii2D[valid_points_mask]
 
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
@@ -383,7 +379,7 @@ class GaussianModel:
 
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
-        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
+        # self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
     def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
         n_init_points = self.get_xyz.shape[0]
